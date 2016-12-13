@@ -72,7 +72,7 @@
 #define HAVE_LINUX_IF_PPPOX_H 1
 
 /* Define if you have the <net/bpf.h> header file.  */
-#define HAVE_NET_BPF_H 1
+//#define HAVE_NET_BPF_H 1
 
 /* Define if you have the <net/if_arp.h> header file.  */
 #define HAVE_NET_IF_ARP_H 1
@@ -129,4 +129,41 @@
 #define HAVE_UNISTD_H 1
 
 /* Define if you have the N_HDLC line discipline in linux/termios.h */
-#define HAVE_N_HDLC 1
+/*#define HAVE_N_HDLC 1*/
+
+/***********************KERNEL_MODE_PPPOE start*********************/
+//#ifdef KERNEL_MODE_PPPOE
+#ifdef HAVE_SYSLOG_H
+#undef HAVE_SYSLOG_H
+
+#define REDIRECT_SYSLOG_TO_ANDROID_LOGCAT 
+#ifdef REDIRECT_SYSLOG_TO_ANDROID_LOGCAT
+
+#define LOG_TAG "rp-pppoe"
+#include <utils/Log.h>
+
+#undef LOG_EMERG
+#undef LOG_ALERT
+#undef LOG_CRIT
+#undef LOG_ERR
+#undef LOG_WARNING
+#undef LOG_NOTICE
+#undef LOG_INFO
+#undef LOG_DEBUG
+#undef syslog
+
+#define LOG_EMERG   ANDROID_LOG_FATAL
+#define LOG_ALERT   ANDROID_LOG_FATAL
+#define LOG_CRIT    ANDROID_LOG_FATAL
+#define LOG_ERR     ANDROID_LOG_ERROR
+#define LOG_WARNING ANDROID_LOG_WARN
+#define LOG_NOTICE  ANDROID_LOG_WARN
+#define LOG_INFO    ANDROID_LOG_INFO
+#define LOG_DEBUG   ANDROID_LOG_DEBUG
+#define syslog(a, b...) android_printLog(a, LOG_TAG, b)
+
+#endif  /* REDIRECT_SYSLOG_TO_ANDROID_LOGCAT */
+
+#endif
+//#endif
+/***********************KERNEL_MODE_PPPOE end*********************/

@@ -36,6 +36,9 @@ static char const RCSID[] =
 /* #include "pppd/pathnames.h" */
 
 #include <linux/types.h>
+#ifndef KERNEL_MODE_PPPOE
+#include <syslog.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -48,7 +51,8 @@ static char const RCSID[] =
 #include <signal.h>
 #include <net/ethernet.h>
 #include <net/if_arp.h>
-#include <linux/ppp_defs.h>
+//#include <linux/ppp_defs.h>
+//#include <linux/if_ppp.h>
 #include <linux/if_pppox.h>
 
 #ifndef _ROOT_PATH
@@ -273,7 +277,7 @@ PPPOEDisconnectDevice(void)
 		sizeof(struct sockaddr_pppox)) < 0)
 	error("Failed to disconnect PPPoE socket: %d %m", errno);
     close(conn->sessionSocket);
-    /* don't send PADT?? */
+    sendPADT(conn, "RP-PPPoE: Session killed manually");
     if (conn->discoverySocket >= 0)
 	close(conn->discoverySocket);
 }

@@ -40,6 +40,15 @@ static char const RCSID[] =
 
 #include <signal.h>
 
+#ifdef KERNEL_MODE_PPPOE
+#include <cutils/properties.h>
+#include <time.h>
+#endif
+
+#include <unistd.h>
+
+void sendPADT_STB(PPPoEConnection* conn, const char* msg);
+
 /* Calculate time remaining until *exp, return 0 if now >= *exp */
 static int time_left(struct timeval *diff, struct timeval *exp)
 {
@@ -269,6 +278,8 @@ sendPADI(PPPoEConnection *conn)
     UINT16_t plen;
     int omit_service_name = 0;
 
+    syslog(LOG_INFO,"sendPADI***************************************");
+
     if (conn->serviceName) {
 	namelen = (UINT16_t) strlen(conn->serviceName);
 	if (!strcmp(conn->serviceName, "NO-SERVICE-NAME-NON-RFC-COMPLIANT")) {
@@ -351,6 +362,8 @@ waitForPADO(PPPoEConnection *conn, int timeout)
 
     PPPoEPacket packet;
     int len;
+
+    syslog(LOG_INFO,"waitForPADO***************************************");
 
     struct PacketCriteria pc;
     pc.conn          = conn;
@@ -453,6 +466,8 @@ sendPADR(PPPoEConnection *conn)
     PPPoETag *svc = (PPPoETag *) packet.payload;
     unsigned char *cursor = packet.payload;
 
+    syslog(LOG_INFO,"sendPADR***************************************");
+
     UINT16_t namelen = 0;
     UINT16_t plen;
 
@@ -545,6 +560,11 @@ waitForPADS(PPPoEConnection *conn, int timeout)
     PPPoEPacket packet;
     int len;
 
+#ifdef KERNEL_MODE_PPPOE 
+    char last_session[64] = {'\0'};
+    syslog(LOG_INFO,"waitForPADS***************************************");
+#endif
+
     if (gettimeofday(&expire_at, NULL) < 0) {
 	error("gettimeofday (waitForPADS): %m");
 	return;
@@ -610,6 +630,14 @@ waitForPADS(PPPoEConnection *conn, int timeout)
 
     info("PPP session is %d", (int) ntohs(conn->session));
 
+#ifdef KERNEL_MODE_PPPOE 
+    snprintf(last_session, 64, "%u:%02x:%02x:%02x:%02x:%02x:%02x",(unsigned int)ntohs(conn->session),
+             conn->peerEth[0], conn->peerEth[1], conn->peerEth[2],
+             conn->peerEth[3], conn->peerEth[4], conn->peerEth[5]);
+    syslog(LOG_INFO, "last_session = %s ", last_session);
+    property_set("persist.ppp.last_session", last_session);
+#endif
+
     /* RFC 2516 says session id MUST NOT be zero or 0xFFFF */
     if (ntohs(conn->session) == 0 || ntohs(conn->session) == 0xFFFF) {
 	error("Access concentrator used a session value of %x -- the AC is violating RFC 2516", (unsigned int) ntohs(conn->session));
@@ -628,9 +656,23 @@ waitForPADS(PPPoEConnection *conn, int timeout)
 void
 discovery(PPPoEConnection *conn)
 {
+    int padtAttempts = 0;
+    int IpadtWaitTime = 1000000;     //ms
+    char CpadtWaitTime[PROPERTY_VALUE_MAX];
     int padiAttempts = 0;
     int padrAttempts = 0;
     int timeout = conn->discoveryTimeout;
+
+#ifdef KERNEL_MODE_PPPOE 
+    property_set("pppoe.started","ok");
+    property_get("persist.ppp.padtwaittime", CpadtWaitTime, "1000000");
+    IpadtWaitTime = atoi(CpadtWaitTime);
+    do {
+	padtAttempts++;    
+	sendPADT_STB(conn,"Session killed manually");
+        usleep(IpadtWaitTime);
+    }while(padtAttempts < 3);
+#endif
 
     do {
 	padiAttempts++;
@@ -674,3 +716,85 @@ discovery(PPPoEConnection *conn)
     conn->discoveryState = STATE_SESSION;
     return;
 }
+
+#ifdef KERNEL_MODE_PPPOE
+void
+sendPADT_STB(PPPoEConnection* conn, const char* msg)
+{
+    PPPoEPacket packet;
+    unsigned char *cursor = packet.payload;
+    char s_last_session[PROPERTY_VALUE_MAX] = {'\0'};
+    unsigned int m[6];
+    unsigned int s;
+    int i = 0;
+    UINT16_t plen = 0;
+    /* Do nothing if no session established yet */
+    if (!conn->session) {
+        //syslog(LOG_INFO,"sendPADT_STB, session is 0");
+    }
+    property_get("persist.ppp.last_session", s_last_session, "0:00:00:00:00:00:00");
+    //syslog(LOG_INFO, "last_session = %s", s_last_session);
+    if(strcmp(s_last_session,"0:00:00:00:00:00:00")==0) {
+        return;
+    }
+    sscanf(s_last_session, "%u:%2x:%2x:%2x:%2x:%2x:%2x",
+                       &s, &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]);
+    for(i=0; i<ETH_ALEN; i++){
+        packet.ethHdr.h_dest[i] = (unsigned char)m[i];
+    }
+    /* Do nothing if no discovery socket */
+    if (conn->discoverySocket < 0) return;
+
+    //memcpy(packet.ethHdr.h_dest, conn->peerEth, ETH_ALEN);
+    memcpy(packet.ethHdr.h_source, conn->myEth, ETH_ALEN);
+
+    packet.ethHdr.h_proto = htons(Eth_PPPOE_Discovery);
+    packet.vertype = PPPOE_VER_TYPE(1, 1);
+    packet.code = CODE_PADT;
+
+    packet.session = htons(s);
+
+    syslog(LOG_INFO,"sendPADT_STB: %s", s_last_session);
+		
+	/* Copy error message */
+    if (msg) {
+	PPPoETag err;
+	size_t elen = strlen(msg);
+	err.type = htons(TAG_GENERIC_ERROR);
+	err.length = htons(elen);
+	strcpy(err.payload, msg);
+	memcpy(cursor, &err, elen + TAG_HDR_SIZE);
+	cursor += elen + TAG_HDR_SIZE;
+	plen += elen + TAG_HDR_SIZE;
+    }
+		
+    /* Copy cookie and relay-ID if needed */
+    if (conn->cookie.type) {
+        CHECK_ROOM(cursor, packet.payload,
+                   ntohs(conn->cookie.length) + TAG_HDR_SIZE);
+        memcpy(cursor, &conn->cookie, ntohs(conn->cookie.length) + TAG_HDR_SIZE);
+        cursor += ntohs(conn->cookie.length) + TAG_HDR_SIZE;
+        plen += ntohs(conn->cookie.length) + TAG_HDR_SIZE;
+    }
+
+    if (conn->relayId.type) {
+        CHECK_ROOM(cursor, packet.payload,
+                   ntohs(conn->relayId.length) + TAG_HDR_SIZE);
+        memcpy(cursor, &conn->relayId, ntohs(conn->relayId.length) + TAG_HDR_SIZE);
+        cursor += ntohs(conn->relayId.length) + TAG_HDR_SIZE;
+        plen += ntohs(conn->relayId.length) + TAG_HDR_SIZE;
+    }
+
+    packet.length = htons(plen);
+    sendPacket(conn, conn->discoverySocket, &packet, (int) (plen + HDR_SIZE));
+#ifdef DEBUGGING_ENABLED
+    if (conn->debugFile) {
+        dumpPacket(conn->debugFile, &packet, "SENT");
+        fprintf(conn->debugFile, "\n");
+        fflush(conn->debugFile);
+    }
+#endif
+//    property_set("persist.ppp.last_session", "0:00:00:00:00:00:00");
+//    syslog(LOG_INFO,"sendPADT_STB over");
+}
+#endif

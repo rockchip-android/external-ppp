@@ -23,7 +23,7 @@ static char const RCSID[] =
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <syslog.h>	/* for LOG_DEBUG */
+//#include <syslog.h>	/* for LOG_DEBUG */
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -99,6 +99,10 @@ sendPADT(PPPoEConnection *conn, char const *msg)
     unsigned char *cursor = packet.payload;
 
     UINT16_t plen = 0;
+
+#ifdef KERNEL_MODE_PPPOE 
+//    property_set("persist.ppp.last_session", "0:00:00:00:00:00:00");
+#endif
 
     /* Do nothing if no session established yet */
     if (!conn->session) return;

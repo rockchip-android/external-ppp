@@ -30,6 +30,7 @@
 
 #define RCSID	"$Id: chap-new.c,v 1.9 2007/06/19 02:08:35 carlsonj Exp $"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "pppd.h"
@@ -39,6 +40,7 @@
 #if defined(__ANDROID__)
 #include "openssl-hash.h"
 #endif
+#include <cutils/properties.h>
 
 #ifdef CHAPMS
 #include "chap_ms.h"
@@ -512,10 +514,16 @@ chap_handle_status(struct chap_client_state *cs, int code, int id,
 			msg = "CHAP authentication failed";
 	}
 	if (msg) {
-		if (len > 0)
+		char info_msg[256];
+		if (len > 0) {
+			snprintf(info_msg, 256, "--%s: %.*s", msg, len, pkt);
 			info("%s: %.*v", msg, len, pkt);
-		else
+		} else {
+			snprintf(info_msg, 256, "--%s", msg);
 			info("%s", msg);
+		}
+		info("%s", info_msg);
+		property_set("net.pppoe.error.codes", info_msg);
 	}
 	if (code == CHAP_SUCCESS)
 		auth_withpeer_success(0, PPP_CHAP, cs->digest->code);

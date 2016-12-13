@@ -51,6 +51,7 @@
 
 #include "pppd.h"
 #include "upap.h"
+#include <cutils/properties.h>
 
 static const char rcsid[] = RCSID;
 
@@ -539,6 +540,7 @@ upap_rauthnak(u, inp, id, len)
     u->us_clientstate = UPAPCS_BADAUTH;
 
     error("PAP authentication failed");
+    property_set("net.pppoe.error.codes", "PAP authentication failed");
     auth_withpeer_fail(u->us_unit, PPP_PAP);
 }
 

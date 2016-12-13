@@ -97,7 +97,9 @@
 #endif
 #include "pppcrypt.h"
 #include "magic.h"
-
+#ifdef KERNEL_MODE_PPPOE
+#include <cutils/properties.h>
+#endif
 static const char rcsid[] = RCSID;
 
 
@@ -467,6 +469,7 @@ chapms_handle_failure(unsigned char *inp, int len)
 		/* M=<message> field found. */
 		p += 3;
 	} else {
+		char error_msg[256];
 		/* No M=<message>; use the error code. */
 		switch (err) {
 		case MS_CHAP_ERROR_RESTRICTED_LOGON_HOURS:
@@ -498,12 +501,25 @@ chapms_handle_failure(unsigned char *inp, int len)
 			free(msg);
 			error("Unknown MS-CHAP authentication failure: %.*v",
 			      len, inp);
+			snprintf(error_msg, 256, "Unknown MS-CHAP authentication failed: %.*s", len, inp);
+			error(error_msg);
+			property_set("net.pppoe.error.codes", error_msg);
 			return;
 		}
 	}
 print_msg:
-	if (p != NULL)
+#ifndef KERNEL_MODE_PPPOE
+	if (p != NULL) 
 		error("MS-CHAP authentication failed: %v", p);
+#else
+	if (p != NULL) {
+                char error_msg[256];
+		snprintf(error_msg, 256, "--MS-CHAP authentication failed: %s", p);
+                error("MS-CHAP authentication failed: %v", p);
+                error(error_msg);
+                property_set("net.pppoe.error.codes", error_msg);
+	}
+#endif
 	free(msg);
 }
 
